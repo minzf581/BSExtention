@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            width: 350px;
+            padding: 15px;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            display: none;
+        }
+        .container.active {
+            display: block;
+        }
+        .status-container {
+            margin-bottom: 15px;
+        }
+        .status {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .status.online {
+            background-color: #4CAF50;
+        }
+        .status.offline {
+            background-color: #f44336;
+        }
+        .stats {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+        }
+        .points-container {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #e3f2fd;
+            border-radius: 4px;
+        }
+        .form-group {
+            margin-bottom: 10px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            width: 100%;
+            padding: 8px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #1976D2;
+        }
+        button:disabled {
+            background-color: #BDBDBD;
+            cursor: not-allowed;
+        }
+        .nav-tabs {
+            display: flex;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        .nav-tab {
+            padding: 8px 15px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+        .nav-tab.active {
+            border-bottom-color: #2196F3;
+            color: #2196F3;
+        }
+        .error-message {
+            color: #f44336;
+            margin-bottom: 10px;
+        }
+        .success-message {
+            color: #4CAF50;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航标签 -->
+    <div class="nav-tabs">
+        <div class="nav-tab active" data-tab="login">登录</div>
+        <div class="nav-tab" data-tab="register">注册</div>
+        <div class="nav-tab" data-tab="main">主页</div>
+        <div class="nav-tab" data-tab="points">积分</div>
+    </div>
+
+    <!-- 登录界面 -->
+    <div id="loginContainer" class="container active">
+        <div class="form-group">
+            <label for="loginUsername">用户名</label>
+            <input type="text" id="loginUsername" />
+        </div>
+        <div class="form-group">
+            <label for="loginPassword">密码</label>
+            <input type="password" id="loginPassword" />
+        </div>
+        <div id="loginError" class="error-message"></div>
+        <button id="loginButton">登录</button>
+    </div>
+
+    <!-- 注册界面 -->
+    <div id="registerContainer" class="container">
+        <div class="form-group">
+            <label for="registerUsername">用户名</label>
+            <input type="text" id="registerUsername" />
+        </div>
+        <div class="form-group">
+            <label for="registerEmail">邮箱</label>
+            <input type="email" id="registerEmail" />
+        </div>
+        <div class="form-group">
+            <label for="registerPassword">密码</label>
+            <input type="password" id="registerPassword" />
+        </div>
+        <div class="form-group">
+            <label for="referralCode">推荐码（可选）</label>
+            <input type="text" id="referralCode" />
+        </div>
+        <div id="registerError" class="error-message"></div>
+        <button id="registerButton">注册</button>
+    </div>
+
+    <!-- 主界面 -->
+    <div id="mainContainer" class="container">
+        <div class="status-container">
+            <span class="status offline" id="connectionStatus"></span>
+            <span id="statusText">未连接</span>
+        </div>
+        
+        <div class="stats">
+            <div>共享带宽: <span id="bandwidthShared">0 MB</span></div>
+            <div>活动连接: <span id="activeConnections">0</span></div>
+            <div>运行时间: <span id="uptime">0:00:00</span></div>
+        </div>
+
+        <button id="toggleProxy">开始共享</button>
+        <button id="logout">退出登录</button>
+    </div>
+
+    <!-- 积分界面 -->
+    <div id="pointsContainer" class="container">
+        <div class="points-container">
+            <h3>我的积分: <span id="currentPoints">0</span></h3>
+            <div>总推荐人数: <span id="totalReferrals">0</span></div>
+            <div>累计获得积分: <span id="totalPointsEarned">0</span></div>
+        </div>
+        
+        <div class="stats">
+            <h4>最近积分记录</h4>
+            <div id="pointsHistory"></div>
+        </div>
+        
+        <div class="form-group">
+            <label>我的推荐码</label>
+            <input type="text" id="myReferralCode" readonly />
+            <button id="copyReferralCode">复制推荐码</button>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
