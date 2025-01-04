@@ -127,3 +127,149 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+# Proxy SDK for Android
+
+## 概述
+
+代理SDK提供Android设备的状态上报功能，通过WebSocket与代理后台保持长连接，定期上报设备状态和流量统计信息。
+
+## 功能特点
+
+- WebSocket长连接
+- 自动重连机制
+- 定期状态上报（每5分钟）
+- 流量统计
+- 心跳检测
+- 动态配置更新
+
+## 集成步骤
+
+1. 添加依赖
+
+```gradle
+dependencies {
+    implementation 'com.proxy.sdk:proxylib:1.0.0'
+}
+```
+
+2. 初始化SDK
+
+```java
+public class MyApplication extends Application {
+    private ProxyClient proxyClient;
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        
+        // 初始化代理客户端
+        proxyClient = new ProxyClient(
+            this,
+            "ws://your-server-url.com",
+            "your_api_key_here"
+        );
+        
+        // 连接服务器
+        proxyClient.connect();
+    }
+
+    @Override
+    public void onTerminate() {
+        // 断开连接
+        if (proxyClient != null) {
+            proxyClient.disconnect();
+        }
+        super.onTerminate();
+    }
+}
+```
+
+3. 更新流量统计
+
+```java
+// 在网络请求完成后更新流量统计
+proxyClient.updateTraffic(uploadBytes, downloadBytes);
+```
+
+## 状态上报数据格式
+
+每5分钟上报一次状态，数据格式如下：
+
+```json
+{
+    "type": "status_report",
+    "data": {
+        "deviceId": "android_xxxx",
+        "deviceType": "android",
+        "status": "online",
+        "ipAddress": "1.2.3.4",
+        "duration": 300,
+        "traffic": {
+            "upload": 1024000,
+            "download": 2048000
+        },
+        "timestamp": 1641288000000
+    }
+}
+```
+
+## 注意事项
+
+1. SDK会自动生成并保存设备ID
+2. 使用前需要配置正确的服务器地址和API密钥
+3. SDK会自动处理断线重连
+4. 每次状态上报后会重置流量统计
+5. 可以通过`isConnected()`方法检查连接状态
+
+## 错误处理
+
+SDK内部会处理大多数错误情况：
+- 网络断开时自动重连
+- 使用指数退避策略避免频繁重连
+- 超时处理
+- 错误日志记录
+
+## 示例代码
+
+完整的示例代码：
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private ProxyClient proxyClient;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        // 初始化代理客户端
+        proxyClient = new ProxyClient(
+            this,
+            "ws://your-server-url.com",
+            "your_api_key_here"
+        );
+
+        // 连接服务器
+        proxyClient.connect();
+
+        // 模拟网络请求完成后更新流量
+        simulateNetworkRequest();
+    }
+
+    private void simulateNetworkRequest() {
+        // 模拟上传和下载流量
+        long uploadBytes = 1024 * 100;  // 100KB
+        long downloadBytes = 1024 * 200; // 200KB
+        proxyClient.updateTraffic(uploadBytes, downloadBytes);
+    }
+
+    @Override
+    protected void onDestroy() {
+        // 断开连接
+        if (proxyClient != null) {
+            proxyClient.disconnect();
+        }
+        super.onDestroy();
+    }
+}

@@ -1,7 +1,6 @@
+import CONFIG from './config.js';
+
 document.addEventListener('DOMContentLoaded', function() {
-    // 常量定义
-    const API_BASE_URL = 'http://your-server-url.com/api';
-    
     // DOM元素
     const navTabs = document.querySelectorAll('.nav-tab');
     const containers = document.querySelectorAll('.container');
@@ -39,7 +38,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     let isProxyActive = false;
     let startTime = null;
-    let authToken = localStorage.getItem('authToken');
+    let deviceId = localStorage.getItem('deviceId');
 
     // 初始化检查登录状态
     checkAuthStatus();
@@ -48,184 +47,144 @@ document.addEventListener('DOMContentLoaded', function() {
     navTabs.forEach(tab => {
         tab.addEventListener('click', () => {
             const tabName = tab.dataset.tab;
-            if ((tabName === 'main' || tabName === 'points') && !authToken) {
-                return; // 未登录不能访问这些页面
+            if ((tabName === 'main' || tabName === 'points') && !deviceId) {
+                return;
             }
-            
-            navTabs.forEach(t => t.classList.remove('active'));
-            containers.forEach(c => c.classList.remove('active'));
-            
-            tab.classList.add('active');
-            document.getElementById(tabName + 'Container').classList.add('active');
+            switchTab(tabName);
         });
-    });
-
-    // 登录表单提交
-    loginForm.button.addEventListener('click', async () => {
-        const username = loginForm.username.value;
-        const password = loginForm.password.value;
-
-        try {
-            const response = await fetch(`${API_BASE_URL}/auth/login`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ username, password })
-            });
-
-            const data = await response.json();
-            if (response.ok) {
-                authToken = data.token;
-                localStorage.setItem('authToken', authToken);
-                localStorage.setItem('username', data.user.username);
-                showMainContainer();
-                updatePointsData();
-            } else {
-                loginForm.error.textContent = data.error || '登录失败';
-            }
-        } catch (error) {
-            loginForm.error.textContent = '网络错误，请稍后重试';
-        }
     });
 
     // 注册表单提交
     registerForm.button.addEventListener('click', async () => {
-        const username = registerForm.username.value;
-        const email = registerForm.email.value;
+        const username = registerForm.username.value.trim();
+        const email = registerForm.email.value.trim();
         const password = registerForm.password.value;
-        const referralCode = registerForm.referralCode.value;
+        const referralCode = registerForm.referralCode.value.trim();
 
-        try {
-            const response = await fetch(`${API_BASE_URL}/auth/register`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ username, email, password, referralCode })
-            });
-
-            const data = await response.json();
-            if (response.ok) {
-                showLoginContainer();
-                registerForm.error.textContent = '注册成功，请登录';
-                registerForm.error.style.color = '#4CAF50';
-            } else {
-                registerForm.error.textContent = data.error || '注册失败';
-            }
-        } catch (error) {
-            registerForm.error.textContent = '网络错误，请稍后重试';
-        }
-    });
-
-    // 退出登录
-    mainElements.logoutButton.addEventListener('click', () => {
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('username');
-        authToken = null;
-        showLoginContainer();
-    });
-
-    // 复制推荐码
-    pointsElements.copyButton.addEventListener('click', () => {
-        navigator.clipboard.writeText(pointsElements.referralCode.value)
-            .then(() => {
-                pointsElements.copyButton.textContent = '已复制';
-                setTimeout(() => {
-                    pointsElements.copyButton.textContent = '复制推荐码';
-                }, 2000);
-            });
-    });
-
-    // 代理开关
-    mainElements.toggleButton.addEventListener('click', function() {
-        if (!authToken) {
-            showLoginContainer();
+        if (!username || !email || !password) {
+            registerForm.error.textContent = '请填写所有必填字段';
             return;
         }
 
-        isProxyActive = !isProxyActive;
-        
-        if (isProxyActive) {
-            startTime = Date.now();
-            chrome.runtime.sendMessage({ 
-                action: 'startProxy',
-                token: authToken
+        try {
+            registerForm.button.disabled = true;
+            const response = await chrome.runtime.sendMessage({
+                action: 'register',
+                data: {
+                    username,
+                    email,
+                    password,
+                    referralCode: referralCode || undefined
+                }
             });
-        } else {
-            startTime = null;
-            chrome.runtime.sendMessage({ 
-                action: 'stopProxy',
-                token: authToken
-            });
+
+            if (response.success) {
+                deviceId = localStorage.getItem('deviceId');
+                showMainContainer();
+                updateStatus(false);
+            } else {
+                registerForm.error.textContent = response.error || '注册失败，请重试';
+            }
+        } catch (error) {
+            registerForm.error.textContent = '注册失败，请重试';
+            console.error('Registration error:', error);
+        } finally {
+            registerForm.button.disabled = false;
         }
-        
-        updateStatus(isProxyActive);
+    });
+
+    // 代理开关
+    mainElements.toggleButton.addEventListener('click', async () => {
+        try {
+            mainElements.toggleButton.disabled = true;
+            
+            if (!isProxyActive) {
+                const response = await chrome.runtime.sendMessage({
+                    action: 'startProxy'
+                });
+                
+                if (response.success) {
+                    isProxyActive = true;
+                    startTime = Date.now();
+                    updateStatus(true);
+                }
+            } else {
+                const response = await chrome.runtime.sendMessage({
+                    action: 'stopProxy'
+                });
+                
+                if (response.success) {
+                    isProxyActive = false;
+                    startTime = null;
+                    updateStatus(false);
+                }
+            }
+        } catch (error) {
+            console.error('Toggle proxy error:', error);
+        } finally {
+            mainElements.toggleButton.disabled = false;
+        }
+    });
+
+    // 注销
+    mainElements.logoutButton.addEventListener('click', () => {
+        if (isProxyActive) {
+            chrome.runtime.sendMessage({ action: 'stopProxy' });
+        }
+        localStorage.clear();
+        deviceId = null;
+        showLoginContainer();
     });
 
     // 更新状态UI
     function updateStatus(connected) {
-        mainElements.statusIndicator.className = `status ${connected ? 'online' : 'offline'}`;
+        mainElements.statusIndicator.className = connected ? 'status-on' : 'status-off';
         mainElements.statusText.textContent = connected ? '已连接' : '未连接';
         mainElements.toggleButton.textContent = connected ? '停止共享' : '开始共享';
+        
+        if (connected && startTime) {
+            updateUptime();
+            setInterval(updateUptime, 1000);
+        }
+    }
+
+    // 更新在线时长
+    function updateUptime() {
+        if (!startTime) return;
+        
+        const duration = Math.floor((Date.now() - startTime) / 1000);
+        const hours = Math.floor(duration / 3600);
+        const minutes = Math.floor((duration % 3600) / 60);
+        const seconds = duration % 60;
+        
+        mainElements.uptime.textContent = 
+            `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     }
 
     // 更新统计信息
-    function updateStats(data) {
-        if (data.bandwidthUsed) {
-            mainElements.bandwidthShared.textContent = `${(data.bandwidthUsed / (1024 * 1024)).toFixed(2)} MB`;
-        }
-        if (data.connections) {
-            mainElements.activeConnections.textContent = data.connections;
-        }
-        if (startTime) {
-            const elapsed = Math.floor((Date.now() - startTime) / 1000);
-            const hours = Math.floor(elapsed / 3600);
-            const minutes = Math.floor((elapsed % 3600) / 60);
-            const seconds = elapsed % 60;
-            mainElements.uptime.textContent = `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        }
-    }
-
-    // 更新积分信息
-    async function updatePointsData() {
-        if (!authToken) return;
-
-        try {
-            const response = await fetch(`${API_BASE_URL}/auth/points`, {
-                headers: {
-                    'Authorization': `Bearer ${authToken}`
-                }
-            });
-
-            const data = await response.json();
-            if (response.ok) {
-                pointsElements.current.textContent = data.currentPoints;
-                pointsElements.totalReferrals.textContent = data.totalReferrals;
-                pointsElements.totalEarned.textContent = data.totalPointsEarned;
-                pointsElements.referralCode.value = localStorage.getItem('username');
-
-                // 更新积分历史
-                pointsElements.history.innerHTML = data.recentHistory
-                    .map(item => `
-                        <div class="history-item">
-                            ${item.points_change > 0 ? '+' : ''}${item.points_change} 积分
-                            (${item.reason})
-                            - ${new Date(item.created_at).toLocaleDateString()}
-                        </div>
-                    `)
-                    .join('');
+    function updateStats() {
+        chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
+            if (response.success) {
+                const { traffic } = response.data;
+                const totalTraffic = (traffic.upload + traffic.download) / (1024 * 1024 * 1024); // Convert to GB
+                mainElements.bandwidthShared.textContent = totalTraffic.toFixed(2) + ' GB';
             }
-        } catch (error) {
-            console.error('Failed to fetch points data:', error);
-        }
+        });
     }
 
     // 检查认证状态
     function checkAuthStatus() {
-        if (authToken) {
+        if (deviceId) {
             showMainContainer();
-            updatePointsData();
+            chrome.runtime.sendMessage({ action: 'getStats' }, (response) => {
+                if (response.success && response.data.startTime) {
+                    isProxyActive = true;
+                    startTime = response.data.startTime;
+                    updateStatus(true);
+                } else {
+                    updateStatus(false);
+                }
+            });
         } else {
             showLoginContainer();
         }
@@ -233,56 +192,43 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 显示登录容器
     function showLoginContainer() {
-        navTabs.forEach(t => t.classList.remove('active'));
-        containers.forEach(c => c.classList.remove('active'));
-        
-        document.querySelector('[data-tab="login"]').classList.add('active');
-        document.getElementById('loginContainer').classList.add('active');
+        containers.forEach(container => {
+            container.style.display = container.id === 'loginContainer' ? 'block' : 'none';
+        });
+        navTabs.forEach(tab => {
+            tab.classList.remove('active');
+            if (tab.dataset.tab === 'login') {
+                tab.classList.add('active');
+            }
+        });
     }
 
     // 显示主界面容器
     function showMainContainer() {
-        navTabs.forEach(t => t.classList.remove('active'));
-        containers.forEach(c => c.classList.remove('active'));
-        
-        document.querySelector('[data-tab="main"]').classList.add('active');
-        document.getElementById('mainContainer').classList.add('active');
+        containers.forEach(container => {
+            container.style.display = container.id === 'mainContainer' ? 'block' : 'none';
+        });
+        navTabs.forEach(tab => {
+            tab.classList.remove('active');
+            if (tab.dataset.tab === 'main') {
+                tab.classList.add('active');
+            }
+        });
     }
 
-    // 监听来自background script的消息
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        if (message.type === 'statsUpdate') {
-            updateStats(message.data);
-        } else if (message.type === 'connectionStatus') {
-            updateStatus(message.connected);
-        } else if (message.type === 'pointsUpdate') {
-            updatePointsData();
-        }
-    });
+    // 切换标签页
+    function switchTab(tabName) {
+        containers.forEach(container => {
+            container.style.display = container.id === `${tabName}Container` ? 'block' : 'none';
+        });
+        navTabs.forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.tab === tabName);
+        });
+    }
 
-    // 定期更新统计信息
-    setInterval(() => {
-        if (startTime) {
-            updateStats({});
-        }
-    }, 1000);
-
-    // 定期更新积分信息
-    setInterval(() => {
-        if (authToken) {
-            updatePointsData();
-        }
-    }, 60000); // 每分钟更新一次
-
-    // 初始化时获取当前状态
-    chrome.runtime.sendMessage({ action: 'getStatus' }, (response) => {
-        if (response) {
-            isProxyActive = response.isActive;
-            updateStatus(isProxyActive);
-            if (isProxyActive) {
-                startTime = response.startTime;
-                updateStats(response.stats);
-            }
-        }
-    });
+    // 定时更新统计信息
+    if (deviceId) {
+        updateStats();
+        setInterval(updateStats, 5000);
+    }
 });

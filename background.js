@@ -1,45 +1,96 @@
 // 配置常量
-const CONFIG = {
-    SERVER_URL: 'wss://your-server-url.com',  // WebSocket服务器地址
-    API_BASE_URL: 'http://your-server-url.com/api',  // REST API地址
-    HEARTBEAT_INTERVAL: 30000,  // 心跳间隔（毫秒）
-    RECONNECT_INTERVAL: 5000    // 重连间隔（毫秒）
-};
+import CONFIG from './config.js';
 
 let ws = null;
 let heartbeatTimer = null;
-let authToken = null;
+let statusReportTimer = null;
+let reconnectAttempts = 0;
+let deviceId = null;
 let proxyStats = {
     bandwidthUsed: 0,
     proxyRequests: 0,
-    startTime: null
+    startTime: null,
+    traffic: {
+        upload: 0,
+        download: 0
+    }
 };
+
+// 初始化设备ID
+function initDeviceId() {
+    deviceId = localStorage.getItem('deviceId');
+    if (!deviceId) {
+        deviceId = CONFIG.DEVICE_ID_PREFIX + Date.now();
+        localStorage.setItem('deviceId', deviceId);
+    }
+}
+
+// 用户注册
+async function registerUser(userData) {
+    try {
+        const response = await fetch(`${CONFIG.API_URL}/auth/register`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-Key': CONFIG.API_KEY
+            },
+            body: JSON.stringify({
+                ...userData,
+                deviceType: CONFIG.DEVICE_TYPE
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Registration failed');
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('Registration error:', error);
+        throw error;
+    }
+}
 
 // 初始化WebSocket连接
 function initializeWebSocket() {
-    if (!authToken) return;
+    if (!deviceId) return;
 
-    ws = new WebSocket(`${CONFIG.SERVER_URL}?token=${authToken}`);
+    // 如果已经有连接，先关闭
+    if (ws) {
+        ws.close();
+        ws = null;
+    }
+
+    ws = new WebSocket(`${CONFIG.WS_URL}?deviceId=${deviceId}&deviceType=${CONFIG.DEVICE_TYPE}`);
 
     ws.onopen = () => {
         console.log('WebSocket connected');
+        reconnectAttempts = 0;
         startHeartbeat();
-        // 发送初始状态
-        sendStats();
+        startStatusReporting();
+        // 连接成功后立即发送一次状态
+        reportStatus();
     };
 
     ws.onmessage = (event) => {
         handleMessage(JSON.parse(event.data));
     };
 
-    ws.onclose = () => {
-        console.log('WebSocket disconnected');
+    ws.onclose = (event) => {
+        console.log('WebSocket disconnected:', event.code, event.reason);
         stopHeartbeat();
+        stopStatusReporting();
+
+        // 指数退避重连
+        const timeout = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+        reconnectAttempts++;
+
         setTimeout(() => {
-            if (authToken) {
+            if (deviceId) {
+                console.log('Attempting to reconnect...');
                 initializeWebSocket();
             }
-        }, CONFIG.RECONNECT_INTERVAL);
+        }, timeout);
     };
 
     ws.onerror = (error) => {
@@ -47,13 +98,75 @@ function initializeWebSocket() {
     };
 }
 
+// 开始状态上报
+function startStatusReporting() {
+    stopStatusReporting();
+    // 每5分钟上报一次状态
+    statusReportTimer = setInterval(reportStatus, CONFIG.STATUS_REPORT_INTERVAL);
+}
+
+// 停止状态上报
+function stopStatusReporting() {
+    if (statusReportTimer) {
+        clearInterval(statusReportTimer);
+        statusReportTimer = null;
+    }
+}
+
+// 上报状态
+async function reportStatus() {
+    if (!deviceId || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+    try {
+        const statusData = {
+            deviceId: deviceId,
+            deviceType: CONFIG.DEVICE_TYPE,
+            username: localStorage.getItem('username'),
+            status: 'online',
+            ipAddress: await getPublicIP(),
+            duration: Math.floor((Date.now() - (proxyStats.startTime || Date.now())) / 1000),
+            traffic: proxyStats.traffic,
+            timestamp: new Date().toISOString()
+        };
+
+        // 通过WebSocket发送状态
+        ws.send(JSON.stringify({
+            type: 'status_report',
+            data: statusData
+        }));
+
+        // 重置流量统计
+        proxyStats.traffic = { upload: 0, download: 0 };
+
+    } catch (error) {
+        console.error('Status report error:', error);
+    }
+}
+
+// 获取公网IP
+async function getPublicIP() {
+    try {
+        const response = await fetch('https://api.ipify.org?format=json');
+        const data = await response.json();
+        return data.ip;
+    } catch (error) {
+        console.error('Failed to get public IP:', error);
+        return 'unknown';
+    }
+}
+
 // 开始心跳
 function startHeartbeat() {
+    stopHeartbeat();
     heartbeatTimer = setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ 
                 type: 'heartbeat',
-                data: { stats: proxyStats }
+                data: {
+                    deviceId: deviceId,
+                    deviceType: CONFIG.DEVICE_TYPE,
+                    timestamp: new Date().toISOString()
+                }
             }));
         }
     }, CONFIG.HEARTBEAT_INTERVAL);
@@ -67,33 +180,33 @@ function stopHeartbeat() {
     }
 }
 
-// 发送统计信息
-function sendStats() {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-            type: 'stats_update',
-            data: proxyStats
-        }));
+// 处理接收到的消息
+function handleMessage(message) {
+    switch (message.type) {
+        case 'proxy_request':
+            handleProxyRequest(message.data);
+            break;
+        case 'heartbeat_ack':
+            // 心跳确认，可以用来检测连接状态
+            break;
+        case 'force_report':
+            // 服务器要求立即上报状态
+            reportStatus();
+            break;
+        case 'config_update':
+            // 服务器下发新的配置
+            handleConfigUpdate(message.data);
+            break;
     }
 }
 
-// 处理接收到的消息
-async function handleMessage(message) {
-    switch (message.type) {
-        case 'proxy_request':
-            await handleProxyRequest(message.data);
-            break;
-        case 'upgrade':
-            handleUpgrade(message.data);
-            break;
-        case 'points_update':
-            handlePointsUpdate(message.data);
-            break;
-        case 'heartbeat_response':
-            // 处理心跳响应
-            break;
-        default:
-            console.log('Unknown message type:', message.type);
+// 处理配置更新
+function handleConfigUpdate(config) {
+    // 更新本地配置
+    if (config.statusReportInterval) {
+        CONFIG.STATUS_REPORT_INTERVAL = config.statusReportInterval;
+        // 重启状态上报定时器
+        startStatusReporting();
     }
 }
 
@@ -110,115 +223,85 @@ async function handleProxyRequest(data) {
         proxyStats.bandwidthUsed += responseData.byteLength;
         proxyStats.proxyRequests++;
 
-        // 更新积分
-        if (authToken) {
-            await updatePoints(responseData.byteLength);
-        }
+        // 更新流量统计
+        proxyStats.traffic.upload += data.body ? data.body.length : 0;
+        proxyStats.traffic.download += responseData.byteLength;
 
-        // 发送响应回服务器
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
                 type: 'proxy_response',
-                data: {
-                    requestId: data.requestId,
-                    status: response.status,
-                    headers: Object.fromEntries(response.headers),
-                    body: Array.from(new Uint8Array(responseData))
-                }
+                requestId: data.requestId,
+                status: response.status,
+                headers: Object.fromEntries(response.headers),
+                data: responseData
             }));
         }
-
-        // 通知popup更新统计信息
-        chrome.runtime.sendMessage({
-            type: 'statsUpdate',
-            data: proxyStats
-        });
     } catch (error) {
         console.error('Proxy request error:', error);
-    }
-}
-
-// 更新积分
-async function updatePoints(bytes) {
-    try {
-        const response = await fetch(`${CONFIG.API_BASE_URL}/points/update`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify({
-                bytes: bytes,
-                type: 'proxy_usage'
-            })
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            chrome.runtime.sendMessage({
-                type: 'pointsUpdate',
-                data: data
-            });
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'proxy_error',
+                requestId: data.requestId,
+                error: error.message
+            }));
         }
-    } catch (error) {
-        console.error('Points update error:', error);
     }
-}
-
-// 处理升级请求
-function handleUpgrade(data) {
-    chrome.runtime.requestUpdateCheck((status) => {
-        if (status === "update_available") {
-            chrome.runtime.reload();
-        }
-    });
-}
-
-// 处理积分更新
-function handlePointsUpdate(data) {
-    chrome.runtime.sendMessage({
-        type: 'pointsUpdate',
-        data: data
-    });
 }
 
 // 监听来自popup的消息
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message.action) {
+        case 'register':
+            registerUser(message.data)
+                .then(response => {
+                    localStorage.setItem('username', message.data.username);
+                    initDeviceId();
+                    sendResponse({ success: true, data: response });
+                })
+                .catch(error => {
+                    sendResponse({ success: false, error: error.message });
+                });
+            return true;
+
         case 'startProxy':
-            authToken = message.token;
-            proxyStats.startTime = Date.now();
+            if (!proxyStats.startTime) {
+                proxyStats.startTime = Date.now();
+            }
             initializeWebSocket();
             sendResponse({ success: true });
             break;
 
         case 'stopProxy':
             if (ws) {
+                // 发送离线状态
+                ws.send(JSON.stringify({
+                    type: 'status_report',
+                    data: {
+                        deviceId: deviceId,
+                        deviceType: CONFIG.DEVICE_TYPE,
+                        status: 'offline',
+                        timestamp: new Date().toISOString()
+                    }
+                }));
                 ws.close();
+                ws = null;
             }
             stopHeartbeat();
+            stopStatusReporting();
             proxyStats.startTime = null;
             sendResponse({ success: true });
             break;
 
-        case 'getStatus':
-            sendResponse({
-                isActive: ws && ws.readyState === WebSocket.OPEN,
-                startTime: proxyStats.startTime,
-                stats: proxyStats
-            });
+        case 'getStats':
+            sendResponse({ success: true, data: proxyStats });
             break;
     }
-    return true;
 });
 
 // 初始化扩展
-chrome.runtime.onInstalled.addListener(() => {
-    // 从storage中恢复认证状态
-    chrome.storage.local.get(['authToken'], (result) => {
-        if (result.authToken) {
-            authToken = result.authToken;
-            initializeWebSocket();
-        }
-    });
+chrome.storage.local.get(['deviceId'], (result) => {
+    if (result.deviceId) {
+        deviceId = result.deviceId;
+        initializeWebSocket();
+    }
 });
