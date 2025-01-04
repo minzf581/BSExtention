@@ -31,6 +31,12 @@ const config = {
     points: {
         bytesPerPoint: 1024 * 1024, // 每1MB流量1积分
         referralBonus: 100 // 推荐奖励积分
+    },
+    
+    // 主系统API配置
+    mainSystemApi: {
+        url: process.env.MAIN_SYSTEM_API || 'https://api.main-system.com',
+        apiKey: process.env.MAIN_SYSTEM_API_KEY || 'main-system-api-key-here'
     }
 };
 
