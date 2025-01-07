@@ -12,7 +12,7 @@
 
 ### 基础环境
 - Node.js >= 16.x
-- MongoDB >= 4.4
+- PostgreSQL >= 12.x
 - Redis >= 6.0
 - PM2 (用于进程管理)
 
@@ -39,8 +39,8 @@
 curl -fsSL https://deb.nodesource.com/setup_16.x | sudo -E bash -
 sudo apt-get install -y nodejs
 
-# 安装 MongoDB
-sudo apt-get install -y mongodb
+# 安装 PostgreSQL
+sudo apt-get install -y postgresql postgresql-contrib
 
 # 安装 Redis
 sudo apt-get install -y redis-server
@@ -64,7 +64,12 @@ npm install
 创建 `.env` 文件并配置以下参数：
 ```
 PORT=3000
-MONGODB_URI=mongodb://localhost:27017/proxy_db
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=proxy_db
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
+DB_SSL=false  # 如需启用SSL设置为true
 REDIS_URL=redis://localhost:6379
 API_KEY=your_api_key
 ```
@@ -82,12 +87,33 @@ pm2 start ecosystem.config.js
 ## 配置说明
 
 ### 数据库配置
-MongoDB配置文件位置：`/etc/mongodb.conf`
+PostgreSQL配置文件位置：`/etc/postgresql/[version]/main/postgresql.conf`
 主要配置项：
-- 数据库路径
-- 日志路径
-- 访问权限
-- 连接池大小
+- 监听地址和端口（默认5432）
+- 最大连接数
+- 内存配置
+- 日志设置
+- SSL配置（可选）
+
+数据库包含以下主要表：
+- extension_connections：存储扩展连接记录
+- users：用户认证信息
+- proxy_requests：代理请求日志
+- stats：统计数据
+
+连接池配置（在应用代码中）：
+```javascript
+{
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT || 5432,
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    ssl: process.env.DB_SSL === 'true' ? {
+        rejectUnauthorized: false
+    } : false
+}
+```
 
 ### Redis配置
 Redis配置文件位置：`/etc/redis/redis.conf`
@@ -171,7 +197,7 @@ node --inspect app.js
 
 ### 5. 数据库连接问题
 检查项：
-- MongoDB服务是否运行
+- PostgreSQL服务是否运行
 - 连接字符串是否正确
 - 防火墙设置
 - 认证信息
